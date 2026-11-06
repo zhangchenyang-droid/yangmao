@@ -349,9 +349,8 @@ const FEEL_DEF = {
     grab: 0.6,       // 判定宽松：推子边缘碰到毛团多少就算剃到
     tuftSize: 1.45,  // 毛团大小（越大越少）
     flyX: 0.18,      // 剃下的毛顺着手势方向飞的比例
-    flyMax: 900,     // 手速封顶：划得再快，毛也只按这个速度算（防止甩太远）
     flyUp: 240,      // 剃下的毛往上弹的力度
-    grav: 1100,      // 毛落地的重力
+    grav: 800,       // 毛落地的重力
     touchOff: 56,    // 手机上推子在手指上方多少像素
     nickSpeed: 2800, // 推得比这更快碰到身体就剪伤（px/s）
     wigMin: 3,       // 羊扭动间隔（秒）最短
@@ -362,10 +361,8 @@ const FEEL_DEF = {
     time: 15,        // 剃一只羊的限时（秒）
     comboGap: 0.6,   // 停手多久连击断开（秒）
 };
-let FEEL = Object.assign({}, FEEL_DEF, (() => { try { return JSON.parse(localStorage.getItem('shear_feel')) || {}; } catch (e) { return {}; } })());
+let FEEL = Object.assign({}, FEEL_DEF, (() => { try { return JSON.parse(localStorage.getItem('shear_feel2')) || {}; } catch (e) { return {}; } })());
 const clipR = () => CLIPPER[S.up.clip] * FEEL.clipMul;
-// 手速软封顶：慢速基本不变，越快越接近上限
-const softCap = v => FEEL.flyMax * Math.tanh(v / FEEL.flyMax);
 const LV_NEED = lv => 3 + lv * 2;   // 升下一级要服务几位客人
 // 牧场装饰：完成目标的奖品，一样样摆到牧场上
 const DECOR = {
@@ -1189,8 +1186,8 @@ function shearAt(sx, sy, vx, vy) {
         if (!t.on || Math.hypot(t.x - p.x, t.y - p.y) >= R + t.r * FEEL.grab) continue;
         if (t.burr) { jamAt(t); return n; }
         t.on = false; n++; A.cut++;
-        if (t.messy) { A.lost++; flyTuft(t, softCap(vx) * FEEL.flyX + rand(-80, 80), softCap(vy) * FEEL.flyX * 0.66 - rand(FEEL.flyUp * 0.5, FEEL.flyUp * 1.1), '#b8a888', '#9a8a6a'); }
-        else { flyTuft(t, softCap(vx) * FEEL.flyX + rand(-80, 80), softCap(vy) * FEEL.flyX * 0.66 - rand(FEEL.flyUp * 0.5, FEEL.flyUp * 1.1), A.def.wool, A.def.woolShade); A.combo++; A.comboT = FEEL.comboGap; A.maxCombo = Math.max(A.maxCombo, A.combo); }
+        if (t.messy) { A.lost++; flyTuft(t, vx * FEEL.flyX + rand(-80, 80), vy * FEEL.flyX * 0.66 - rand(FEEL.flyUp * 0.5, FEEL.flyUp * 1.1), '#b8a888', '#9a8a6a'); }
+        else { flyTuft(t, vx * FEEL.flyX + rand(-80, 80), vy * FEEL.flyX * 0.66 - rand(FEEL.flyUp * 0.5, FEEL.flyUp * 1.1), A.def.wool, A.def.woolShade); A.combo++; A.comboT = FEEL.comboGap; A.maxCombo = Math.max(A.maxCombo, A.combo); }
     }
     if (A.def.regions.some(reg => inEllipse(p.x, p.y, reg)) && (A.wiggle.act > 0 || clip.speed > FEEL.nickSpeed)) nick(p);
     return n;
@@ -1594,7 +1591,7 @@ $('cardBg').addEventListener('pointerdown', e => { if (e.target === $('cardBg') 
 // ---------- 剃毛调参面板：剃毛房间里连点顶上的星星 5 下 ----------
 const FEEL_UI = [
     ['clipMul', '推子大小', 0.6, 2, 0.05], ['grab', '判定宽松', 0, 1.2, 0.05], ['tuftSize', '毛团大小', 1, 2.2, 0.05],
-    ['flyX', '毛顺手势飞', 0, 0.4, 0.01], ['flyMax', '毛飞远上限', 200, 3000, 50], ['flyUp', '毛往上弹', 0, 500, 10], ['grav', '重力', 300, 2000, 50], ['touchOff', '推子离手指(px)', 0, 120, 2],
+    ['flyX', '毛顺手势飞', 0, 0.4, 0.01], ['flyUp', '毛往上弹', 0, 500, 10], ['grav', '重力', 300, 2000, 50], ['touchOff', '推子离手指(px)', 0, 120, 2],
     ['nickSpeed', '推太快剪伤(px/s)', 1000, 6000, 100], ['wigMin', '扭动间隔·最短', 1, 8, 0.1], ['wigMax', '扭动间隔·最长', 1, 10, 0.1],
     ['warn', '「!」预警(秒)', 0.2, 1.5, 0.05], ['wigDur', '扭动时长(秒)', 0.2, 1, 0.05], ['nickPen', '剪伤扣星', 0, 1, 0.1],
     ['time', '限时(秒)', 6, 40, 1], ['comboGap', '连击断开(秒)', 0.2, 1.5, 0.05],
@@ -1610,13 +1607,13 @@ function openFeel() {
         const k = l.dataset.k, inp = l.querySelector('input');
         inp.oninput = () => {
             FEEL[k] = +inp.value; l.querySelector('em').textContent = fmt(k, inp.value); l.classList.toggle('ch', FEEL[k] !== FEEL_DEF[k]);
-            localStorage.setItem('shear_feel', JSON.stringify(FEEL));
+            localStorage.setItem('shear_feel2', JSON.stringify(FEEL));
             if (k === 'time' && A) { A.tmax = FEEL.time; A.time = Math.min(A.time, FEEL.time); }
         };
     });
     $('fMin').onclick = () => { el.classList.toggle('min'); $('fMin').textContent = el.classList.contains('min') ? '展开' : '收起'; };
     $('fClose').onclick = () => { el.classList.add('hidden'); feelOpen = false; };
-    $('fReset').onclick = () => { FEEL = Object.assign({}, FEEL_DEF); localStorage.removeItem('shear_feel'); openFeel(); };
+    $('fReset').onclick = () => { FEEL = Object.assign({}, FEEL_DEF); localStorage.removeItem('shear_feel2'); openFeel(); };
     $('fCopy').onclick = () => {
         const t = JSON.stringify(FEEL);
         (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => popText(W / 2, H * 0.3, '已复制，发给我就行', 'good')).catch(() => prompt('复制下面这行发给我', t));
