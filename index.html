@@ -390,6 +390,8 @@ const loomMul = () => Math.pow(0.8, S.up.loom);
 const loomCount = () => 1 + S.up.loom2;
 const myColors = () => [...new Set(S.sheep.map(s => ADEF[s.a].color))].sort((a, b) => CORDER.indexOf(a) - CORDER.indexOf(b));
 const isFed = s => s.fedUntil > Date.now();
+// 剪到皮：每道口子让下一次长毛慢 30%（长满后清零）
+const growTime = s => ADEF[s.a].grow * (1 + 0.3 * (s.cuts || 0));
 
 // ============================================================
 // 时间推进（每帧，以及离线回来时一次性推进）
@@ -402,7 +404,8 @@ function advance(dt, offline) {
         if (s.grow >= 1) continue;
         const d = ADEF[s.a], fedLeft = Math.max(0, (s.fedUntil - Date.now()) / 1000);
         const fast = offline ? 0 : Math.min(dt, fedLeft);   // 喂草期间长毛 ×2
-        s.grow = Math.min(1, s.grow + (dt + fast) / d.grow);
+        s.grow = Math.min(1, s.grow + (dt + fast) / growTime(s));
+        if (s.grow >= 1) s.cuts = 0;
         if (s.grow >= 1) { log.sheep++; if (!offline) { sfx.done(); const v = view.get(s.uid); if (v && scene === 'farm') popText(v.x, v.y - 50, '✂️ 毛长好了！', 'good'); } }
     }
     // 纺车：一种颜色连续纺，直到这种毛用完
@@ -1057,11 +1060,12 @@ function drawPasture(dt) {
             ctx.strokeStyle = '#f0a020'; ctx.lineWidth = 3; ctx.stroke();
             ctx.font = '16px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('✂️', lx, ly + b + 1);
         } else {
-            const left = Math.ceil((1 - s.grow) * ADEF[s.a].grow / (isFed(s) ? 2 : 1));
+            const left = Math.ceil((1 - s.grow) * growTime(s) / (isFed(s) ? 2 : 1));
             ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.beginPath(); ctx.arc(lx, ly, 14, 0, TAU); ctx.fill();
             ctx.strokeStyle = isFed(s) ? '#3fae4a' : '#7cc46a'; ctx.lineWidth = 3.5; ctx.beginPath(); ctx.arc(lx, ly, 12, -Math.PI / 2, -Math.PI / 2 + TAU * s.grow); ctx.stroke();
             ctx.fillStyle = '#4a3418'; ctx.font = '800 10px -apple-system,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(left, lx, ly + 1);
             if (isFed(s)) { ctx.font = '14px sans-serif'; ctx.fillText('🌿', lx + 21, ly - 7); }
+            if (s.cuts) { ctx.font = '14px sans-serif'; ctx.fillText('🩹', lx - 21, ly - 7); }
         }
     }
     drawButterflies(P);
@@ -1074,7 +1078,7 @@ function tapPasture(x, y) {
         if (Math.abs(x - v.x) < v.sz * 0.45 && y > v.y - v.sz * 0.6 && y < v.y + v.sz * 0.35) {
             audio();
             if (s.grow >= 1) { baa(1, 0.4, 0.07); enterShear(s); }
-            else { baa(0.9, 0.3, 0.05); popText(v.x, v.y - v.sz * 0.5, `毛还要 ${Math.ceil((1 - s.grow) * ADEF[s.a].grow)} 秒`); }
+            else { baa(0.9, 0.3, 0.05); popText(v.x, v.y - v.sz * 0.5, `毛还要 ${Math.ceil((1 - s.grow) * growTime(s))} 秒${s.cuts ? ` · 🩹伤口让它长得慢` : ''}`); }
             return;
         }
     }
@@ -1191,10 +1195,10 @@ function shearResult() {
     const units = Math.max(1, Math.round(d.yield * (0.5 + q / 6) * (1 - A.lost / A.total) * (isFed(m) ? 1.2 : 1) * ratio * (wet ? 0.6 : 1))) + combo + fast;
     m.wet = 0;
     S.wool[d.color] = (S.wool[d.color] || 0) + units; woolLock[d.color] = (woolLock[d.color] || 0) + units;
-    m.grow = 0; S.dex[m.uid] = (S.dex[m.uid] || 0) + 1; S.st.sheared++;
+    m.cuts = A.nicks.length; m.grow = 0; S.dex[m.uid] = (S.dex[m.uid] || 0) + 1; S.st.sheared++;
     save();
     const stars = '⭐'.repeat(Math.floor(q)) + (q % 1 ? '✨' : '') + '☆'.repeat(3 - Math.ceil(q));
-    const note = [combo && `连击 ×${A.maxCombo} +${combo}`, fast && '神速 +1', wet && '💧淋湿 -40%', A.timeout && '没剃完', A.nicks.length && `剪到皮 ${A.nicks.length} 次`].filter(Boolean).map(x => ' · ' + x).join('');
+    const note = [combo && `连击 ×${A.maxCombo} +${combo}`, fast && '神速 +1', wet && '💧淋湿 -40%', A.timeout && '没剃完', A.nicks.length && `剪到皮 ${A.nicks.length} 次，长毛慢 ${A.nicks.length * 30}%`].filter(Boolean).map(x => ' · ' + x).join('');
     A.gather = { t: 0, next: 0, arrived: 0, expected: Math.max(1, pile.length + flying.length), units, color: d.color, uid: m.uid, label: `${stars} ${COLORS[d.color].name}毛 ×${units}${note}`, done: false };
 }
 // 剃毛房间里的毛篮（左下角）
@@ -1352,16 +1356,40 @@ function burr(x, y, r) {
     ctx.strokeStyle = '#5a3e1e'; ctx.lineWidth = 1.6;
     for (let k = 0; k < 10; k++) { const a = k / 10 * TAU; ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * r * 0.7, y + Math.sin(a) * r * 0.7); ctx.lineTo(x + Math.cos(a) * r * 1.5, y + Math.sin(a) * r * 1.5); ctx.stroke(); }
 }
+const bridgeCache = new Map();
+function skinBridges(d) {
+    if (bridgeCache.has(d.id)) return bridgeCache.get(d.id);
+    const inE = (x, y, [cx, cy, rx, ry]) => ((x - cx) / (rx * 0.88)) ** 2 + ((y - cy) / (ry * 0.86)) ** 2 <= 1;
+    const B = d.regions[0], out = [];
+    for (const R of d.regions.slice(1)) {
+        if (R[4]) continue;
+        // 从这个部位的中心往身体中心走，找「离开部位」和「进入身体」的位置
+        let tr = 0, tb = 1;
+        for (let t = 0; t <= 1; t += 0.01) { const x = R[0] + (B[0] - R[0]) * t, y = R[1] + (B[1] - R[1]) * t; if (inE(x, y, R)) tr = t; if (inE(x, y, B)) { tb = t; break; } }
+        if (tr + 0.005 < tb) {
+            const p = t => ({ x: R[0] + (B[0] - R[0]) * t, y: R[1] + (B[1] - R[1]) * t });
+            out.push([p(Math.max(0, tr - 0.04)), p(Math.min(1, tb + 0.04)), Math.min(R[2] * 0.88, R[3] * 0.86) * 1.1]);
+        }
+    }
+    bridgeCache.set(d.id, out);
+    return out;
+}
 function drawBody(st, tf) {
     const d = st.def;
     const legLen = d.head === 'alpaca' ? 70 : 52, legX = d.head === 'alpaca' ? [-70, -40, 30, 58] : [-80, -45, 45, 82];
     const step = st.walking ? Math.sin(T * 22) * 8 : 0;
+    // 腿从身体椭圆的底边往里插一截再往下画，外侧的腿也不会和肚子断开（脚的位置不变）
+    const [bx, by, brx, bry] = d.regions[0], erx = brx * 0.88, ery = bry * 0.86;
     legX.forEach((lx, i) => {
-        ctx.fillStyle = d.leg === d.wool ? d.skin : d.leg; ctx.beginPath(); ctx.roundRect(lx - 9 + (i % 2 ? step : -step), 70, 18, legLen, 8); ctx.fill();
+        const ix = lx - Math.sign(lx - bx) * 9, k = (ix - bx) / erx, yb = Math.abs(k) < 1 ? by + ery * Math.sqrt(1 - k * k) : by;
+        const top = Math.min(70, yb - 14);
+        ctx.fillStyle = d.leg === d.wool ? d.skin : d.leg; ctx.beginPath(); ctx.roundRect(lx - 9 + (i % 2 ? step : -step), top, 18, legLen + 70 - top, 8); ctx.fill();
         ctx.fillStyle = '#3a3030'; ctx.beginPath(); ctx.roundRect(lx - 10 + (i % 2 ? step : -step), 62 + legLen, 20, 12, 5); ctx.fill();
     });
     ctx.fillStyle = d.skin;
     for (const [cx, cy, rx, ry, noSkin] of d.regions) { if (noSkin) continue; ctx.beginPath(); ctx.ellipse(cx, cy, rx * 0.88, ry * 0.86, 0, 0, TAU); ctx.fill(); }
+    // 头 / 脖子 / 尾巴和身体之间如果有缝，补一段同色的圆头连接
+    for (const [a, b, w] of skinBridges(d)) { ctx.strokeStyle = d.skin; ctx.lineWidth = w; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
     for (const n of st.nicks || []) { ctx.fillStyle = '#e8706a'; ctx.beginPath(); ctx.ellipse(n.x, n.y, 7, 4, 0.4, 0, TAU); ctx.fill(); ctx.fillStyle = '#fff'; ctx.fillRect(n.x - 9, n.y - 2, 18, 3); }
     drawHeadBack(d);
     for (const t of tf) if (t.on) fluff(t.x, t.y, t.r, t.messy ? '#d8cbb0' : d.wool, t.messy ? '#b8a888' : d.woolShade);
@@ -1424,7 +1452,7 @@ function drawShearRoom() {
             ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.beginPath(); ctx.roundRect(x, y, w, 12, 6); ctx.fill();
             ctx.fillStyle = '#7cc46a'; ctx.beginPath(); ctx.roundRect(x, y, Math.max(12, w * pct), 12, 6); ctx.fill();
             ctx.fillStyle = '#4a3418'; ctx.font = '800 14px -apple-system,"PingFang SC",sans-serif'; ctx.textAlign = 'center';
-            if (A.state === 'shear') ctx.fillText('手指划过身体剃毛 · 冒「!」时先停一下', W / 2, y + 40);
+            if (A.state === 'shear') ctx.fillText('手指划过身体剃毛 · 冒「!」时先停一下（剪到皮长毛会变慢）', W / 2, y + 40);
         }
         // 倒计时条
         if (A.state === 'shear' || A.state === 'enter') {
